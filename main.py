@@ -1,67 +1,66 @@
+# backend.py
+
 from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Dict, List
-from matching import calculate_match, generate_explanation
+from typing import List
+from models import Candidate, Internship, Project
+from database import add_candidate, add_internship, add_project, get_all_candidates, get_internship_by_id, get_project_by_id
+from matching import rank_candidates
 
 app = FastAPI()
 
-# In-memory storage (for demo)
-candidates = []
-internships = []
-
-
-# ----------- Data Models ------------
-
-class Candidate(BaseModel):
-    id: int
-    name: str
-    skills: Dict[str, int]  # skill: proficiency (1-5)
-
-
-class Internship(BaseModel):
-    id: int
-    title: str
-    required_skills: Dict[str, int]  # skill: weight
-
-
-# ----------- Add Candidate ------------
+# -------------------
+# Candidate Endpoints
+# -------------------
 
 @app.post("/add_candidate")
-def add_candidate(candidate: Candidate):
-    candidates.append(candidate)
-    return {"message": "Candidate added successfully"}
+def api_add_candidate(candidate: Candidate):
+    add_candidate(candidate)
+    return {"message": f"Candidate {candidate.name} added successfully!"}
+
+@app.get("/get_candidates", response_model=List[Candidate])
+def api_get_candidates():
+    return get_all_candidates()
 
 
-# ----------- Add Internship ------------
+# -------------------
+# Internship Endpoints
+# -------------------
 
 @app.post("/add_internship")
-def add_internship(internship: Internship):
-    internships.append(internship)
-    return {"message": "Internship added successfully"}
+def api_add_internship(internship: Internship):
+    add_internship(internship)
+    return {"message": f"Internship '{internship.title}' added successfully!"}
 
-
-# ----------- Match Candidates ------------
-
-@app.get("/match/{internship_id}")
-def match_candidates(internship_id: int):
-    internship = next((i for i in internships if i.id == internship_id), None)
-
+@app.get("/match_internship/{internship_id}")
+def api_match_internship(internship_id: int):
+    internship = get_internship_by_id(internship_id)
     if not internship:
         return {"error": "Internship not found"}
 
-    results = []
+    # 🔹 Apply communication filter for internships
+    results = rank_candidates(get_all_candidates(), internship.required_skills, filter_communication=True)
+    if not results:
+        return {"error": "No eligible candidates due to poor communication"}
+    return results
 
-    for candidate in candidates:
-        score = calculate_match(candidate.skills, internship.required_skills)
-        explanation = generate_explanation(candidate.skills, internship.required_skills)
 
-        results.append({
-            "candidate_name": candidate.name,
-            "match_score": score,
-            "explanation": explanation
-        })
+# -------------------
+# Project Endpoints
+# -------------------
 
-    # Sort by highest score
-    results.sort(key=lambda x: x["match_score"], reverse=True)
+@app.post("/add_project")
+def api_add_project(project: Project):
+    add_project(project)
+    return {"message": f"Project '{project.title}' added successfully!"}
 
+@app.get("/match_project/{project_id}")
+def api_match_project(project_id: int):
+    project = get_project_by_id(project_id)
+    if not project:
+        return {"error": "Project not found"}
+
+    # Projects can consider all candidates
+    results = rank_candidates(get_all_candidates(), project.required_skills, filter_communication=False)
+    if not results:
+        return {"error": "No candidates available"}
     return results
